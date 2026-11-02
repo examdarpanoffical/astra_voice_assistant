@@ -1,0 +1,72 @@
+name: Build Astra Android APK
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "lib/**"
+      - "pubspec.yaml"
+      - ".github/workflows/build-android.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Generate Android platform project
+        run: flutter create --platforms=android --org in.examdarpan --project-name astra_voice_assistant .
+
+      - name: Add Android permissions
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path("android/app/src/main/AndroidManifest.xml")
+          text = path.read_text()
+          marker = '<manifest'
+          start = text.find('>', text.find(marker))
+          if start < 0:
+              raise SystemExit("Could not locate manifest opening tag")
+          permissions = '''
+              <uses-permission android:name="android.permission.INTERNET" />
+              <uses-permission android:name="android.permission.RECORD_AUDIO" />
+          '''
+          if "android.permission.INTERNET" not in text:
+              text = text[:start + 1] + permissions + text[start + 1:]
+          elif "android.permission.RECORD_AUDIO" not in text:
+              text = text[:start + 1] + '\n    <uses-permission android:name="android.permission.RECORD_AUDIO" />' + text[start + 1:]
+          path.write_text(text)
+          PY
+
+      - name: Resolve Flutter packages
+        run: flutter pub get
+
+      - name: Build release APK
+        run: flutter build apk --release
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: astra-voice-assistant-release-apk
+          path: build/app/outputs/flutter-apk/app-release.apk
+          if-no-files-found: error
+          retention-days: 30
